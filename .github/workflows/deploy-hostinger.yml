@@ -1,0 +1,75 @@
+name: Deploy 404 Bizlab to Hostinger
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'styles.css'
+      - 'app.js'
+      - '.github/workflows/deploy-hostinger.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: 404-bizlab-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        shell: bash
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_REMOTE_DIR: ${{ secrets.FTP_REMOTE_DIR }}
+        run: |
+          set -euo pipefail
+          test -n "$FTP_SERVER"
+          test -n "$FTP_USERNAME"
+          test -n "$FTP_PASSWORD"
+          test -n "$FTP_REMOTE_DIR"
+
+      - name: Upload public files over FTPS
+        shell: bash
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_REMOTE_DIR: ${{ secrets.FTP_REMOTE_DIR }}
+        run: |
+          set -euo pipefail
+          REMOTE_DIR="${FTP_REMOTE_DIR#/}"
+          for file in index.html styles.css app.js; do
+            echo "Uploading $file"
+            curl --fail --show-error --silent \
+              --ftp-ssl-reqd --ftp-pasv \
+              --user "$FTP_USERNAME:$FTP_PASSWORD" \
+              --ftp-create-dirs \
+              -T "$file" \
+              "ftp://$FTP_SERVER/$REMOTE_DIR/$file"
+          done
+
+      - name: Verify public page
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error --location --max-time 15 \
+              https://404foundme.com/bizlab/ | grep -q '404 비즈랩'; then
+              echo 'Production page verified.'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Files uploaded, but public verification did not pass in time.' >&2
+          exit 1
